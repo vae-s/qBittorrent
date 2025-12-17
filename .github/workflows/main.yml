@@ -1,0 +1,91 @@
+name: Build qBittorrent (Windows x64)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+    # 1️⃣ 拉取源码（含子模块）
+    - name: Checkout source
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    # 2️⃣ 安装 MSYS2 + 依赖
+    - name: Setup MSYS2
+      uses: msys2/setup-msys2@v2
+      with:
+        msystem: MINGW64
+        update: true
+        install: >
+          mingw-w64-x86_64-toolchain
+          mingw-w64-x86_64-cmake
+          mingw-w64-x86_64-qt6
+          mingw-w64-x86_64-libtorrent-rasterbar
+          mingw-w64-x86_64-openssl
+          mingw-w64-x86_64-zlib
+
+    # 3️⃣ CMake 配置
+    - name: Configure
+      shell: msys2 {0}
+      run: |
+        mkdir build
+        cd build
+        cmake .. \
+          -G "MinGW Makefiles" \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DGUI=ON \
+          -DWEBUI=ON
+
+    # 4️⃣ 编译
+    - name: Build
+      shell: msys2 {0}
+      run: |
+        cd build
+        mingw32-make -j$(nproc)
+
+    # 5️⃣ 打包成绿色版（关键步骤）
+    - name: Bundle runtime (green version)
+      shell: msys2 {0}
+      run: |
+        mkdir -p package/platforms
+
+        # 主程序
+        cp build/qbittorrent.exe package/
+
+        # Qt 运行库
+        cp /mingw64/bin/Qt6Core.dll package/
+        cp /mingw64/bin/Qt6Gui.dll package/
+        cp /mingw64/bin/Qt6Widgets.dll package/
+        cp /mingw64/bin/Qt6Network.dll package/
+        cp /mingw64/bin/Qt6Svg.dll package/
+
+        # Qt 平台插件（必不可少）
+        cp /mingw64/share/qt6/plugins/platforms/qwindows.dll package/platforms/
+
+        # libtorrent / openssl / 基础库
+        cp /mingw64/bin/libtorrent*.dll package/
+        cp /mingw64/bin/libcrypto*.dll package/
+        cp /mingw64/bin/libssl*.dll package/
+        cp /mingw64/bin/zlib1.dll package/
+        cp /mingw64/bin/libstdc++-6.dll package/
+        cp /mingw64/bin/libgcc_s_seh-1.dll package/
+        cp /mingw64/bin/libwinpthread-1.dll package/
+
+    # 6️⃣ 压缩为 zip
+    - name: Create zip
+      run: |
+        powershell Compress-Archive package qbittorrent-windows-x64.zip
+
+    # 7️⃣ 上传构建产物
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: qbittorrent-windows-x64
+        path: qbittorrent-windows-x64.zip
